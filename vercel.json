@@ -1,4 +1,6 @@
 {
+  "framework": null,
+  "buildCommand": "",
   "outputDirectory": "frontend",
   "routes": [
     { "handle": "filesystem" },
