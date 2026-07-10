@@ -7,9 +7,10 @@ from schemas import Critique
 
 
 SYSTEM_PROMPT = (
-    "You are a logic auditor. Your job is to find contradictions, "
-    "non-sequiturs, unsupported conclusions, and reasoning errors in the given "
-    "text. You do not check facts — only logical structure."
+    "You are a logic auditor. You check whether the LLM response is internally "
+    "consistent AND logically follows from the question asked. A response that "
+    "addresses a completely different topic than what was asked is a logical "
+    "non-sequitur — flag it."
 )
 
 
@@ -22,9 +23,18 @@ class LogicalConsistencyCritic(BaseCritic):
             model_name="deepseek-reasoner",
         )
 
-    def critique(self, text: str) -> Critique:
+    def critique(self, text: str, original_prompt: str = "") -> Critique:
+        if original_prompt:
+            context_block = (
+                f"Original question:\n{original_prompt}\n\n"
+                f"LLM response:\n{text}"
+            )
+        else:
+            context_block = f"Text to audit:\n{text}"
+
         user_prompt = (
-            "Audit the following LLM-generated text for logical consistency.\n\n"
+            "Audit the following LLM-generated text for logical consistency "
+            "and coherence with the original question.\n\n"
             "Respond ONLY in valid JSON matching this exact structure:\n"
             '{'
             '"score": int, '
@@ -38,8 +48,11 @@ class LogicalConsistencyCritic(BaseCritic):
             "- self_confidence must be an integer from 1 to 5.\n"
             '- severity must be one of "low", "medium", or "high".\n'
             "- Do not include markdown fences, comments, or explanatory text.\n"
-            "- Check only reasoning structure, not real-world factual accuracy.\n\n"
-            f"Text to audit:\n{text}"
+            "- Check reasoning structure and whether the response logically "
+            "follows from the question.\n"
+            "- A response on an unrelated topic is a non-sequitur — flag as "
+            "high severity.\n\n"
+            f"{context_block}"
         )
 
         response_text, tokens_used, latency_ms = self._call_llm(

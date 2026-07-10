@@ -1,0 +1,1358 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LLM Output Arbitration System</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            surface: '#080C18',
+            card: '#0D1224',
+            border: 'rgba(255,255,255,0.07)',
+            critic: '#A78BFA',
+            adjudicator: '#6366F1',
+          },
+          fontFamily: {
+            sans: ['system-ui', '-apple-system', 'sans-serif'],
+            mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+          },
+        },
+      },
+    }
+  </script>
+</head>
+<body class="bg-surface text-gray-200 font-sans antialiased">
+
+  <style>
+    body { background-color: #080C18; }
+    .border-subtle { border-color: rgba(255,255,255,0.07); }
+    .glow-purple { box-shadow: 0 0 40px rgba(167,139,250,0.08); }
+    .glow-indigo { box-shadow: 0 0 40px rgba(99,102,241,0.08); }
+
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(167,139,250,0.3); }
+      50% { box-shadow: 0 0 20px 4px rgba(167,139,250,0.4); }
+    }
+    @keyframes flow-down {
+      0% { transform: scaleY(0); opacity: 0; }
+      100% { transform: scaleY(1); opacity: 1; }
+    }
+    @keyframes flow-particle {
+      0% { top: 0; opacity: 1; }
+      100% { top: 100%; opacity: 0; }
+    }
+    @keyframes fade-in-up {
+      0% { opacity: 0; transform: translateY(12px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes slide-in-bottom {
+      0% { opacity: 0; transform: translateY(20px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes results-enter {
+      0% { opacity: 0; transform: translateY(30px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    .animate-pulse-glow { animation: pulse-glow 1.5s ease-in-out infinite; }
+    .animate-flow-down { animation: flow-down 0.4s ease-out forwards; transform-origin: top; }
+    .animate-fade-in-up { animation: fade-in-up 0.5s ease-out forwards; }
+    .animate-slide-in-bottom { animation: slide-in-bottom 0.6s ease-out forwards; }
+    .animate-spin-slow { animation: spin 1s linear infinite; }
+    .animate-results-enter { animation: results-enter 0.7s cubic-bezier(0.16,1,0.3,1) forwards; }
+
+    .flow-line {
+      position: relative;
+      width: 2px;
+      background: linear-gradient(to bottom, rgba(167,139,250,0.4), rgba(99,102,241,0.4));
+      overflow: hidden;
+    }
+    .flow-line::after {
+      content: '';
+      position: absolute;
+      width: 100%;
+      height: 8px;
+      background: #A78BFA;
+      border-radius: 50%;
+      animation: flow-particle 1s ease-in-out infinite;
+    }
+    .flow-line-h {
+      height: 2px;
+      background: linear-gradient(to right, rgba(167,139,250,0.4), rgba(99,102,241,0.4));
+    }
+    .node-idle { opacity: 0.3; }
+    .node-active { opacity: 1; }
+
+    /* SVG Score Ring */
+    .svg-ring-bg { fill: none; stroke: rgba(255,255,255,0.06); stroke-width: 6; }
+    .svg-ring-fill {
+      fill: none; stroke-width: 6; stroke-linecap: round;
+      transform: rotate(-90deg); transform-origin: center;
+      transition: stroke-dashoffset 1.2s ease-out;
+    }
+
+    /* Annotated text highlights */
+    .hl-high { background: rgba(239,68,68,0.2); border-bottom: 2px solid #ef4444; cursor: help; }
+    .hl-medium { background: rgba(234,179,8,0.15); border-bottom: 2px solid #eab308; cursor: help; }
+    .hl-low { border-bottom: 1px dashed rgba(255,255,255,0.3); cursor: help; }
+
+    /* Global tooltip (fixed position, appended to body) */
+    #global-tooltip {
+      position: fixed;
+      background: #151a2e; border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px; padding: 10px 14px; font-size: 11px;
+      color: #e5e7eb; max-width: 280px; min-width: 160px;
+      white-space: normal; word-wrap: break-word;
+      pointer-events: none; opacity: 0; transition: opacity 0.15s;
+      z-index: 99999; box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+      line-height: 1.5;
+    }
+    #global-tooltip.visible { opacity: 1; }
+    #global-tooltip .tt-arrow {
+      position: absolute; left: 50%; transform: translateX(-50%);
+      width: 0; height: 0;
+      border-left: 6px solid transparent; border-right: 6px solid transparent;
+    }
+    #global-tooltip.arrow-down .tt-arrow {
+      bottom: -6px; border-top: 6px solid #151a2e;
+    }
+    #global-tooltip.arrow-up .tt-arrow {
+      top: -6px; border-bottom: 6px solid #151a2e;
+    }
+
+    /* Dot rating */
+    .dot-rating { display: flex; gap: 4px; }
+    .dot-rating .dot { width: 8px; height: 8px; border-radius: 50%; }
+    .dot-empty { background: rgba(255,255,255,0.08); }
+
+    /* Issue chip */
+    .issue-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 8px; border-radius: 4px; font-size: 11px;
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);
+      max-width: 100%; cursor: default;
+    }
+    .issue-chip:hover { background: rgba(255,255,255,0.08); }
+
+    /* Results divider */
+    .results-divider {
+      display: flex; align-items: center; gap: 12px; margin: 32px 0;
+    }
+    .results-divider::before, .results-divider::after {
+      content: ''; flex: 1; height: 1px; background: rgba(255,255,255,0.07);
+    }
+
+    /* How-it-works diagram animations */
+    @keyframes diag-node-pulse {
+      0%, 100% { border-color: rgba(255,255,255,0.08); }
+      50% { border-color: rgba(99,102,241,0.2); }
+    }
+    @keyframes line-draw-in {
+      0% { transform: scaleX(0); opacity: 0; }
+      100% { transform: scaleX(1); opacity: 1; }
+    }
+    @keyframes travel-dot {
+      0% { left: 0%; opacity: 0; }
+      5% { opacity: 1; }
+      95% { opacity: 1; }
+      100% { left: 100%; opacity: 0; }
+    }
+    .line-draw.visible {
+      animation: line-draw-in 0.5s ease-out forwards;
+    }
+    .traveling-dot {
+      position: absolute;
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: #6366F1;
+      box-shadow: 0 0 6px #6366F1;
+      animation: travel-dot 3s ease-in-out infinite;
+      opacity: 0;
+    }
+    .diagram-visible .traveling-dot { opacity: 0; animation: travel-dot 3s ease-in-out infinite; }
+  </style>
+
+  <!-- Navigation -->
+  <nav class="fixed top-0 w-full z-50 bg-surface/80 backdrop-blur-md border-b border-subtle">
+    <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+      <a href="#hero" class="text-white font-semibold tracking-tight text-lg">
+        <span class="text-critic">◆</span> Arbitration
+      </a>
+      <div class="flex items-center gap-8 text-sm text-gray-400">
+        <a href="#how-it-works" class="hover:text-white transition-colors">How it works</a>
+        <a href="#try-it" class="hover:text-white transition-colors">Try it</a>
+        <a href="#stack" class="hover:text-white transition-colors">Stack</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero Section -->
+  <section id="hero" class="min-h-screen flex flex-col items-center justify-center px-6 relative overflow-hidden">
+    <!-- Subtle radial glow -->
+    <div class="absolute inset-0 pointer-events-none" style="background: radial-gradient(ellipse 80% 60% at 50% 35%, rgba(99,102,241,0.05) 0%, transparent 70%)"></div>
+
+    <div class="max-w-3xl text-center relative z-10 pt-20">
+      <!-- Eyebrow -->
+      <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-subtle text-xs text-gray-400 mb-8">
+        <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+        Catches what self-evaluation misses
+      </div>
+
+      <!-- Headline -->
+      <h1 class="text-5xl md:text-6xl font-bold tracking-tight leading-[1.1] mb-4">
+        <span class="text-white">LLM outputs fail</span><br/>
+        <span class="text-critic">silently.</span>
+      </h1>
+      <p class="text-xl md:text-2xl text-white font-medium mb-6">
+        Arbitration catches it before your users do.
+      </p>
+
+      <!-- Subtext -->
+      <p class="text-[15px] text-gray-400 max-w-xl mx-auto mb-8 leading-relaxed">
+        Models hallucinate, contradict themselves, and miss the point — confidently.
+        Three independent AI critics audit any output in parallel, flag disagreements,
+        and deliver a structured verdict in seconds.
+      </p>
+
+      <!-- Two CTAs -->
+      <div class="flex items-center justify-center gap-4 mb-8">
+        <a href="#try-it"
+           class="px-6 py-3 bg-critic text-white font-medium rounded-lg hover:bg-critic/90 transition-all text-sm">
+          Run an arbitration →
+        </a>
+        <a href="#how-it-works"
+           class="px-6 py-3 border border-subtle text-gray-300 font-medium rounded-lg hover:border-gray-500 hover:text-white transition-all text-sm">
+          See how it works
+        </a>
+      </div>
+
+      <!-- Stat pills -->
+      <div class="flex flex-wrap items-center justify-center gap-3 mb-12">
+        <span class="px-3 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.06] text-xs text-gray-400">
+          ✓ 3 independent critics
+        </span>
+        <span class="px-3 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.06] text-xs text-gray-400">
+          ⚡ Parallel dispatch
+        </span>
+        <span class="px-3 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.06] text-xs text-gray-400">
+          $ ~$0.003 per run
+        </span>
+      </div>
+    </div>
+
+    <!-- Mini-preview card -->
+    <div class="relative z-10 w-full max-w-2xl mx-auto">
+      <div class="bg-card border border-white/[0.08] rounded-2xl p-5 shadow-2xl" style="box-shadow: 0 0 60px rgba(99,102,241,0.06), 0 20px 60px rgba(0,0,0,0.4);">
+        <!-- Mini pipeline -->
+        <div class="flex items-center justify-between gap-2 mb-4">
+          <!-- Input -->
+          <div class="flex-shrink-0 px-3 py-1.5 bg-white/[0.04] border border-white/[0.06] rounded-lg text-[11px] text-gray-400 font-mono">
+            Input
+          </div>
+          <!-- Arrow -->
+          <div class="flex-1 h-px bg-gradient-to-r from-critic/40 to-critic/20 relative">
+            <div class="absolute right-0 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-critic/60"></div>
+          </div>
+          <!-- Critics -->
+          <div class="flex gap-1.5 flex-shrink-0">
+            <div class="w-8 h-8 rounded-lg bg-red-400/10 border border-red-400/20 flex items-center justify-center">
+              <span class="text-[9px] font-mono text-red-400 font-bold">FA</span>
+            </div>
+            <div class="w-8 h-8 rounded-lg bg-amber-400/10 border border-amber-400/20 flex items-center justify-center">
+              <span class="text-[9px] font-mono text-amber-400 font-bold">LC</span>
+            </div>
+            <div class="w-8 h-8 rounded-lg bg-blue-400/10 border border-blue-400/20 flex items-center justify-center">
+              <span class="text-[9px] font-mono text-blue-400 font-bold">CO</span>
+            </div>
+          </div>
+          <!-- Arrow -->
+          <div class="flex-1 h-px bg-gradient-to-r from-critic/20 to-adjudicator/40 relative">
+            <div class="absolute right-0 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-adjudicator/60"></div>
+          </div>
+          <!-- Adjudicator -->
+          <div class="flex-shrink-0 px-3 py-1.5 bg-adjudicator/10 border border-adjudicator/20 rounded-lg text-[11px] text-adjudicator font-mono">
+            Adjudicator
+          </div>
+          <!-- Arrow -->
+          <div class="w-6 h-px bg-gradient-to-r from-adjudicator/40 to-amber-400/40"></div>
+          <!-- Verdict badge -->
+          <div class="flex-shrink-0 px-3 py-1.5 bg-amber-500/10 border border-amber-500/25 rounded-lg">
+            <span class="font-mono text-sm font-bold text-amber-400">7/10</span>
+          </div>
+        </div>
+
+        <!-- Result summary line -->
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3 text-[11px] text-gray-500">
+            <span class="flex items-center gap-1">
+              <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+              2 issues confirmed
+            </span>
+            <span class="flex items-center gap-1">
+              <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>
+              1 dismissed
+            </span>
+            <span>·</span>
+            <span class="font-mono">14.2s</span>
+            <span>·</span>
+            <span class="font-mono">$0.0031</span>
+          </div>
+          <span class="text-[10px] text-gray-600 italic">sample output</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom spacer for full-screen feel -->
+    <div class="h-12"></div>
+  </section>
+
+  <!-- How It Works Section — Animated Pipeline Diagram -->
+  <section id="how-it-works" class="py-24 px-6 overflow-hidden">
+    <div class="max-w-6xl mx-auto">
+      <h2 class="text-3xl font-bold text-white mb-2 text-center">How it works</h2>
+      <p class="text-gray-500 text-center text-sm mb-16">The full pipeline, left to right.</p>
+
+      <!-- Pipeline diagram container -->
+      <div class="relative" id="pipeline-diagram">
+        <!-- SVG connection lines layer -->
+        <svg class="absolute inset-0 w-full h-full pointer-events-none z-0" id="pipeline-svg" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="grad-main" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" style="stop-color:#6366F1;stop-opacity:0.5"/>
+              <stop offset="100%" style="stop-color:#6366F1;stop-opacity:0.2"/>
+            </linearGradient>
+            <linearGradient id="grad-amber" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" style="stop-color:#F59E0B;stop-opacity:0.5"/>
+              <stop offset="100%" style="stop-color:#F59E0B;stop-opacity:0.2"/>
+            </linearGradient>
+          </defs>
+        </svg>
+
+        <!-- Nodes grid — 5 columns -->
+        <div class="grid grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr_auto_1fr] items-center gap-0 relative z-10" id="diagram-grid">
+
+          <!-- COL 1: INPUT NODE -->
+          <div class="flex justify-center">
+            <div id="diag-input" class="bg-card border border-white/[0.08] rounded-xl p-4 w-44 opacity-0 translate-x-[-20px] transition-all duration-700" style="animation: diag-node-pulse 3s ease-in-out infinite;">
+              <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Your text</div>
+              <div class="text-[11px] text-gray-400 leading-relaxed font-mono">
+                <div class="truncate">The Eiffel Tower was built</div>
+                <div class="truncate text-gray-600">in 1750 and stands 1200m...</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- COL 2: Lines input → critics -->
+          <div class="flex flex-col items-center justify-center gap-6 px-3 h-full">
+            <div class="line-draw w-12 h-[2px] bg-gradient-to-r from-indigo-500/50 to-indigo-500/20 opacity-0 origin-left" data-delay="400"></div>
+            <div class="line-draw w-12 h-[2px] bg-gradient-to-r from-indigo-500/50 to-indigo-500/20 opacity-0 origin-left" data-delay="600"></div>
+            <div class="line-draw w-12 h-[2px] bg-gradient-to-r from-indigo-500/50 to-indigo-500/20 opacity-0 origin-left" data-delay="800"></div>
+          </div>
+
+          <!-- COL 3: CRITICS (stacked) -->
+          <div class="flex flex-col gap-3">
+            <!-- Factual Accuracy -->
+            <div id="diag-fa" class="bg-card border border-white/[0.06] rounded-lg p-3 opacity-0 translate-x-[-10px] transition-all duration-700">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="w-2 h-2 rounded-full bg-red-400"></span>
+                <span class="text-[11px] text-gray-200 font-medium">Factual Accuracy</span>
+                <span class="ml-auto text-[9px] px-1.5 py-0.5 rounded bg-white/[0.04] text-gray-500 font-mono">deepseek-chat</span>
+              </div>
+              <div class="text-[10px] text-gray-500">Claims, dates, numbers, names</div>
+            </div>
+            <!-- Logical Consistency -->
+            <div id="diag-lc" class="bg-card border border-white/[0.06] rounded-lg p-3 opacity-0 translate-x-[-10px] transition-all duration-700">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+                <span class="text-[11px] text-gray-200 font-medium">Logical Consistency</span>
+                <span class="ml-auto text-[9px] px-1.5 py-0.5 rounded bg-white/[0.04] text-gray-500 font-mono">deepseek-reasoner</span>
+              </div>
+              <div class="text-[10px] text-gray-500">Internal logic, contradictions</div>
+            </div>
+            <!-- Completeness -->
+            <div id="diag-comp" class="bg-card border border-white/[0.06] rounded-lg p-3 opacity-0 translate-x-[-10px] transition-all duration-700">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="w-2 h-2 rounded-full bg-blue-400"></span>
+                <span class="text-[11px] text-gray-200 font-medium">Completeness</span>
+                <span class="ml-auto text-[9px] px-1.5 py-0.5 rounded bg-white/[0.04] text-gray-500 font-mono">deepseek-chat</span>
+              </div>
+              <div class="text-[10px] text-gray-500">Gaps, missed requirements</div>
+            </div>
+          </div>
+
+          <!-- COL 4: Lines critics → disagreement -->
+          <div class="flex items-center px-3">
+            <div class="line-draw w-10 h-[2px] bg-gradient-to-r from-indigo-500/30 to-amber-500/40 opacity-0 origin-left" data-delay="1200"></div>
+          </div>
+
+          <!-- COL 5: DISAGREEMENT DETECTOR -->
+          <div class="flex justify-center">
+            <div id="diag-disagree" class="relative opacity-0 scale-90 transition-all duration-700">
+              <div class="w-28 h-28 rotate-45 bg-card border-2 border-amber-500/30 rounded-xl flex items-center justify-center" style="box-shadow: 0 0 20px rgba(245,158,11,0.06);">
+                <div class="-rotate-45 text-center">
+                  <div class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Disagreement</div>
+                  <div class="text-[9px] text-gray-500 uppercase tracking-wider mb-1">Detector</div>
+                  <div id="disagree-toggle" class="text-[10px] font-medium text-amber-400">⚠ 2-pt spread</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- COL 6: Line disagreement → adjudicator -->
+          <div class="flex items-center px-3">
+            <div class="line-draw w-10 h-[2px] bg-gradient-to-r from-amber-500/30 to-indigo-500/40 opacity-0 origin-left" data-delay="1600"></div>
+          </div>
+
+          <!-- COL 7: ADJUDICATOR -->
+          <div class="flex justify-center">
+            <div id="diag-adj" class="bg-card border-2 border-adjudicator/20 rounded-xl p-4 w-44 opacity-0 translate-x-[10px] transition-all duration-700" style="box-shadow: 0 0 24px rgba(99,102,241,0.06);">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-[11px] text-adjudicator font-semibold">Adjudicator</span>
+                <span class="text-[9px] px-1.5 py-0.5 rounded bg-adjudicator/10 text-adjudicator/70 font-mono">deepseek-reasoner</span>
+              </div>
+              <div class="text-[10px] text-gray-500 leading-relaxed">Reviews all critiques + disagreements, resolves with evidence, produces final verdict</div>
+            </div>
+          </div>
+
+          <!-- COL 8: Line adjudicator → verdict -->
+          <div class="flex items-center px-3">
+            <div class="line-draw w-10 h-[2px] bg-gradient-to-r from-indigo-500/30 to-green-500/40 opacity-0 origin-left" data-delay="2000"></div>
+          </div>
+
+          <!-- COL 9: VERDICT -->
+          <div class="flex justify-center">
+            <div id="diag-verdict" class="bg-card border border-green-500/20 rounded-xl p-4 w-36 text-center opacity-0 translate-x-[10px] transition-all duration-700" style="box-shadow: 0 0 20px rgba(16,185,129,0.06);">
+              <div class="inline-flex items-center justify-center w-14 h-14 rounded-full border-2 border-green-500/40 mb-2">
+                <span class="font-mono text-lg font-bold text-green-400">8/10</span>
+              </div>
+              <div class="text-[10px] text-gray-400 mb-1">Confirmed 1 · Dismissed 2</div>
+              <div class="text-[10px] text-gray-600 font-mono">~$0.003 · ~4s</div>
+            </div>
+          </div>
+
+        </div>
+        <!-- End grid -->
+
+        <!-- Animated traveling dots (CSS only) -->
+        <div class="absolute inset-0 pointer-events-none z-20 overflow-hidden" id="dot-layer">
+          <div class="traveling-dot" style="top:50%; animation-delay:0s;"></div>
+          <div class="traveling-dot" style="top:30%; animation-delay:0.7s;"></div>
+          <div class="traveling-dot" style="top:70%; animation-delay:1.4s;"></div>
+        </div>
+      </div>
+
+      <!-- Callout pills -->
+      <div class="grid md:grid-cols-3 gap-4 mt-16">
+        <div class="callout-pill bg-card border border-subtle rounded-xl p-4 cursor-pointer hover:border-white/[0.12] transition-all" onclick="this.querySelector('.callout-body').classList.toggle('hidden')">
+          <div class="flex items-start gap-2">
+            <span class="text-critic text-sm">⚡</span>
+            <div>
+              <div class="text-[12px] text-gray-200 font-medium">Why parallel?</div>
+              <div class="text-[11px] text-gray-500 mt-0.5">Each critic runs simultaneously — 3x faster than serial.</div>
+              <div class="callout-body hidden text-[11px] text-gray-400 mt-2 leading-relaxed border-t border-subtle pt-2">
+                The logic critic uses deepseek-reasoner and takes ~10s. Running sequentially would mean 10s + 4s + 4s = 18s total. In parallel, total time equals the slowest critic alone (~10s). Thread pool overhead is &lt;5ms.
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="callout-pill bg-card border border-subtle rounded-xl p-4 cursor-pointer hover:border-white/[0.12] transition-all" onclick="this.querySelector('.callout-body').classList.toggle('hidden')">
+          <div class="flex items-start gap-2">
+            <span class="text-amber-400 text-sm">◆</span>
+            <div>
+              <div class="text-[12px] text-gray-200 font-medium">Why different models?</div>
+              <div class="text-[11px] text-gray-500 mt-0.5">Independent blind spots — one model's weakness is another's strength.</div>
+              <div class="callout-body hidden text-[11px] text-gray-400 mt-2 leading-relaxed border-t border-subtle pt-2">
+                deepseek-chat is fast and great at factual recall. deepseek-reasoner is slower but excels at chain-of-thought logic. Using both means logical contradictions get caught even when the fast model misses them.
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="callout-pill bg-card border border-subtle rounded-xl p-4 cursor-pointer hover:border-white/[0.12] transition-all" onclick="this.querySelector('.callout-body').classList.toggle('hidden')">
+          <div class="flex items-start gap-2">
+            <span class="text-green-400 text-sm">✓</span>
+            <div>
+              <div class="text-[12px] text-gray-200 font-medium">Why an adjudicator?</div>
+              <div class="text-[11px] text-gray-500 mt-0.5">Critics disagree 23% of the time — someone makes the final call.</div>
+              <div class="callout-body hidden text-[11px] text-gray-400 mt-2 leading-relaxed border-t border-subtle pt-2">
+                The completeness critic often flags things the factual critic rates as fine. The adjudicator resolves these by checking if the flagged issue is actually a gap or just a concise answer. It also dismisses false positives — confirmed issues only make the final verdict.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Try It Section -->
+  <section id="try-it" class="py-32 px-6">
+    <div class="max-w-5xl mx-auto">
+      <h2 class="text-3xl font-bold text-white mb-4 text-center">Try it</h2>
+      <p class="text-gray-400 text-center mb-8">Select a demo case and see the pipeline in action.</p>
+
+      <!-- Demo mode banner -->
+      <div class="rounded-lg px-4 py-2.5 mb-8 text-center" style="background: #78350F;">
+        <span class="text-[12px]" style="color: #FCD34D;">
+          ⚡ Demo mode — pre-recorded runs. Live API available on request →
+          <a href="https://www.linkedin.com/in/YOUR_LINKEDIN" target="_blank" class="underline hover:no-underline">LinkedIn</a>
+          &nbsp;|&nbsp;
+          <a href="mailto:your@email.com" class="underline hover:no-underline">your@email.com</a>
+        </span>
+      </div>
+
+      <!-- Demo case selector pills -->
+      <div class="flex flex-wrap items-center justify-center gap-3 mb-6">
+        <button class="demo-pill px-4 py-2 rounded-lg border border-subtle text-xs text-gray-400 hover:border-critic/40 hover:text-gray-200 transition-all" data-case="0">
+          Factual errors
+        </button>
+        <button class="demo-pill px-4 py-2 rounded-lg border border-subtle text-xs text-gray-400 hover:border-critic/40 hover:text-gray-200 transition-all" data-case="1">
+          Logical contradiction
+        </button>
+        <button class="demo-pill px-4 py-2 rounded-lg border border-subtle text-xs text-gray-400 hover:border-critic/40 hover:text-gray-200 transition-all" data-case="2">
+          Strong output
+        </button>
+      </div>
+
+      <!-- Input area -->
+      <div class="bg-card border border-subtle rounded-xl p-6 mb-8" id="input-card">
+        <label class="block text-sm text-gray-400 mb-2">Original prompt</label>
+        <input id="prompt-input" type="text" placeholder="Select a demo case above"
+          class="w-full bg-surface border border-subtle rounded-lg px-4 py-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-critic/40 transition-colors mb-4" readonly />
+        <label class="block text-sm text-gray-400 mb-2">LLM output to evaluate</label>
+        <textarea id="text-input" rows="5" placeholder="Select a demo case above to populate..."
+          class="w-full bg-surface border border-subtle rounded-lg px-4 py-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-critic/40 transition-colors resize-none"></textarea>
+      </div>
+
+      <!-- Run button -->
+      <div class="flex justify-center mb-12">
+        <button id="run-btn"
+          class="px-8 py-3 bg-critic text-white font-medium rounded-lg hover:bg-critic/90 transition-colors text-sm disabled:opacity-40 disabled:cursor-not-allowed">
+          Arbitrate
+        </button>
+      </div>
+
+      <!-- Pipeline Visualization -->
+      <div id="pipeline" class="hidden">
+        <div class="flex justify-center mb-2">
+          <div id="node-input" class="node-idle bg-card border border-subtle rounded-xl px-6 py-3 text-center transition-all duration-300">
+            <div class="text-xs text-gray-500 uppercase tracking-wider mb-1">Input</div>
+            <div class="text-sm text-gray-300 font-mono truncate max-w-xs" id="node-input-text">—</div>
+          </div>
+        </div>
+        <div class="flex justify-center"><div id="line-input-critics" class="flow-line h-10 opacity-0"></div></div>
+        <div class="flex justify-center mb-2">
+          <div class="w-64 flex items-center">
+            <div class="flex-1 h-px flow-line-h"></div>
+            <div class="w-2 h-2 rounded-full bg-critic/60 mx-1"></div>
+            <div class="flex-1 h-px flow-line-h"></div>
+          </div>
+        </div>
+        <div class="grid grid-cols-3 gap-6 max-w-3xl mx-auto mb-2">
+          <div class="flex justify-center"><div class="flow-line h-6 opacity-0" id="line-to-fa"></div></div>
+          <div class="flex justify-center"><div class="flow-line h-6 opacity-0" id="line-to-lc"></div></div>
+          <div class="flex justify-center"><div class="flow-line h-6 opacity-0" id="line-to-comp"></div></div>
+        </div>
+
+        <!-- Critic Nodes -->
+        <div class="grid grid-cols-3 gap-6 max-w-3xl mx-auto mb-2">
+          <div id="node-fa" class="node-idle bg-card border border-subtle rounded-xl p-4 transition-all duration-500">
+            <div class="flex items-center gap-2 mb-2"><span class="w-2 h-2 rounded-full bg-red-400"></span><span class="text-xs text-gray-400">Factual Accuracy</span></div>
+            <div id="fa-content" class="text-center py-3"><div class="text-gray-600 text-xs">waiting</div></div>
+          </div>
+          <div id="node-lc" class="node-idle bg-card border border-subtle rounded-xl p-4 transition-all duration-500">
+            <div class="flex items-center gap-2 mb-2"><span class="w-2 h-2 rounded-full bg-amber-400"></span><span class="text-xs text-gray-400">Logical Consistency</span></div>
+            <div id="lc-content" class="text-center py-3"><div class="text-gray-600 text-xs">waiting</div></div>
+          </div>
+          <div id="node-comp" class="node-idle bg-card border border-subtle rounded-xl p-4 transition-all duration-500">
+            <div class="flex items-center gap-2 mb-2"><span class="w-2 h-2 rounded-full bg-blue-400"></span><span class="text-xs text-gray-400">Completeness</span></div>
+            <div id="comp-content" class="text-center py-3"><div class="text-gray-600 text-xs">waiting</div></div>
+          </div>
+        </div>
+
+        <div class="flex justify-center"><div id="line-critics-disagree" class="flow-line h-8 opacity-0"></div></div>
+        <div class="flex justify-center mb-2">
+          <div id="node-disagree" class="node-idle bg-card border border-subtle rounded-xl px-6 py-3 text-center transition-all duration-500">
+            <div class="text-xs text-gray-500 uppercase tracking-wider mb-1">Disagreement Detector</div>
+            <div id="disagree-content" class="text-sm font-mono text-gray-600">—</div>
+          </div>
+        </div>
+        <div class="flex justify-center"><div id="line-disagree-adj" class="flow-line h-8 opacity-0"></div></div>
+        <div class="flex justify-center mb-2">
+          <div id="node-adj" class="node-idle bg-card border border-adjudicator/20 rounded-xl px-6 py-4 text-center transition-all duration-500 max-w-md w-full">
+            <div class="text-xs text-adjudicator uppercase tracking-wider mb-2">Adjudicator</div>
+            <div id="adj-content" class="text-sm text-gray-600">—</div>
+          </div>
+        </div>
+        <div class="flex justify-center"><div id="line-adj-verdict" class="flow-line h-8 opacity-0"></div></div>
+
+        <!-- Mini verdict node in pipeline -->
+        <div id="node-verdict" class="hidden bg-card border border-subtle rounded-xl p-4 max-w-xs mx-auto mt-2 text-center">
+          <div class="text-xs text-gray-500 uppercase tracking-wider mb-1">Verdict Ready</div>
+          <div id="verdict-mini" class="font-mono text-lg font-bold text-white">—</div>
+        </div>
+      </div>
+      <!-- End Pipeline -->
+
+      <!-- ============================================================ -->
+      <!-- RESULTS SECTION -->
+      <!-- ============================================================ -->
+      <div id="results-section" class="hidden mt-8 opacity-0">
+        <!-- Divider -->
+        <div class="results-divider">
+          <span class="text-[10px] text-gray-500 uppercase tracking-[0.2em] font-medium">Results</span>
+        </div>
+
+        <div class="grid md:grid-cols-3 gap-0 bg-card rounded-2xl border border-subtle mb-8">
+
+          <!-- Panel 1: Verdict Summary -->
+          <div class="p-6 flex flex-col items-center border-r border-subtle relative" id="panel-verdict">
+            <div id="panel-verdict-border" class="absolute top-0 left-0 right-0 h-[3px]"></div>
+            <div class="text-[10px] text-gray-500 uppercase tracking-[0.15em] mb-5">Verdict</div>
+
+            <!-- SVG Ring -->
+            <div class="relative mb-4">
+              <svg width="120" height="120" viewBox="0 0 120 120">
+                <circle class="svg-ring-bg" cx="60" cy="60" r="52"/>
+                <circle id="score-ring-circle" class="svg-ring-fill" cx="60" cy="60" r="52"
+                  stroke-dasharray="326.73" stroke-dashoffset="326.73"/>
+              </svg>
+              <div class="absolute inset-0 flex items-center justify-center">
+                <span id="score-ring-value" class="font-mono text-3xl font-bold text-white">0</span>
+                <span class="text-gray-500 font-mono text-sm ml-0.5">/10</span>
+              </div>
+            </div>
+
+            <!-- Confidence -->
+            <div id="confidence-badge" class="px-3 py-1 rounded-full bg-white/5 text-[11px] text-gray-400 font-mono mb-4"></div>
+
+            <!-- Disagreement banner -->
+            <div id="agreement-indicator" class="w-full"></div>
+
+            <!-- Confirmed / Dismissed -->
+            <div class="flex gap-6 mt-4 mb-4">
+              <div class="text-center">
+                <div id="confirmed-count" class="font-mono text-xl font-bold text-white">0</div>
+                <div class="text-[10px] text-gray-500 uppercase tracking-wider">Confirmed</div>
+              </div>
+              <div class="text-center">
+                <div id="dismissed-count" class="font-mono text-xl font-bold text-white">0</div>
+                <div class="text-[10px] text-gray-500 uppercase tracking-wider">Dismissed</div>
+              </div>
+            </div>
+
+            <!-- Cost / Latency -->
+            <div class="mt-auto pt-4 border-t border-subtle w-full">
+              <div class="flex justify-center gap-4 font-mono text-[11px] text-gray-500 items-center">
+                <span id="metric-cost"></span>
+                <span class="text-gray-700">·</span>
+                <span id="metric-latency"></span>
+                <span class="relative group">
+                  <svg class="w-3 h-3 text-gray-600 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2"/><path stroke-width="2" d="M12 16v-4m0-4h.01"/></svg>
+                  <span class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-[#151a2e] border border-white/10 rounded-lg text-[10px] text-gray-300 w-48 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">Cost covers all LLM calls: 3 parallel critics + 1 adjudicator pass via DeepSeek API.</span>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Panel 2: Critic Breakdown -->
+          <div class="p-6 border-r border-subtle relative" id="panel-critics">
+            <div class="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-red-400 via-amber-400 to-blue-400"></div>
+            <div class="text-[10px] text-gray-500 uppercase tracking-[0.15em] mb-5">Critic Breakdown</div>
+            <div id="critic-rows" class="space-y-5"></div>
+          </div>
+
+          <!-- Panel 3: Annotated Output -->
+          <div class="p-6 relative" id="panel-annotated">
+            <div id="panel-annotated-border" class="absolute top-0 left-0 right-0 h-[3px] bg-gray-700"></div>
+            <div class="flex items-center justify-between mb-4">
+              <div class="text-[10px] text-gray-500 uppercase tracking-[0.15em]">Annotated Output</div>
+              <div id="annotation-legend" class="flex items-center gap-3 text-[10px] text-gray-500">
+                <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-red-500/40 border border-red-500/60"></span>High</span>
+                <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-amber-500/30 border border-amber-500/50"></span>Medium</span>
+                <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm border border-dashed border-gray-400/40"></span>Low</span>
+              </div>
+            </div>
+            <div id="annotated-text" class="text-[13px] text-gray-300 leading-relaxed"></div>
+          </div>
+        </div>
+
+        <!-- Action buttons -->
+        <div class="flex items-center justify-center gap-4 mb-4">
+          <button id="reset-btn"
+            class="px-6 py-2.5 bg-card border border-subtle text-gray-300 text-sm rounded-lg hover:border-critic/30 hover:text-white transition-all">
+            Run another
+          </button>
+          <button id="copy-btn"
+            class="px-6 py-2.5 bg-card border border-subtle text-gray-300 text-sm rounded-lg hover:border-critic/30 hover:text-white transition-all">
+            Copy results as JSON
+          </button>
+        </div>
+        <p class="text-center text-[11px] text-gray-600">
+          Powered by DeepSeek deepseek-chat + deepseek-reasoner via LangGraph
+        </p>
+      </div>
+      <!-- End Results Section -->
+
+    </div>
+  </section>
+
+  <!-- Tech Stack Footer -->
+  <footer id="stack" class="border-t border-subtle py-16 px-6">
+    <div class="max-w-5xl mx-auto text-center">
+      <p class="text-sm text-gray-500 mb-6">Built with</p>
+      <div class="flex flex-wrap justify-center gap-3 mb-8">
+        <span class="px-4 py-2 bg-card border border-subtle rounded-lg text-xs text-gray-300 font-mono">LangGraph</span>
+        <span class="px-4 py-2 bg-card border border-subtle rounded-lg text-xs text-gray-300 font-mono">FastAPI</span>
+        <span class="px-4 py-2 bg-card border border-subtle rounded-lg text-xs text-gray-300 font-mono">DeepSeek</span>
+        <span class="px-4 py-2 bg-card border border-subtle rounded-lg text-xs text-gray-300 font-mono">Pydantic</span>
+        <span class="px-4 py-2 bg-card border border-subtle rounded-lg text-xs text-gray-300 font-mono">Streamlit</span>
+        <span class="px-4 py-2 bg-card border border-subtle rounded-lg text-xs text-gray-300 font-mono">Docker</span>
+      </div>
+      <div class="text-xs text-gray-600">
+        90% accuracy on 20-case eval set · $0.005 avg cost · 22s avg latency
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const spinner = `<svg class="w-5 h-5 animate-spin-slow text-critic mx-auto" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>`;
+
+    let lastResult = null;
+    let selectedCaseIndex = -1;
+
+    // --- DEMO DATA ---
+    const DEMO_CASES = [
+      {
+        label: "Factual errors",
+        input_text: "The Python programming language was created by Guido van Rossum and first released in 1995. It is a compiled language known for its verbose syntax and is primarily used for systems programming.",
+        original_prompt: "Explain the Python programming language briefly.",
+        result: {
+          input_text: "The Python programming language was created by Guido van Rossum and first released in 1995. It is a compiled language known for its verbose syntax and is primarily used for systems programming.",
+          verdict: {
+            quality_score: 3, confidence: 5, critics_agreed: false,
+            confirmed_issues: [
+              { description: "Python was first released in 1991, not 1995", quote: "first released in 1995", severity: "high" },
+              { description: "Python is an interpreted language, not compiled", quote: "compiled language", severity: "high" },
+              { description: "Python is known for clean, readable syntax — not verbose", quote: "verbose syntax", severity: "medium" }
+            ],
+            dismissed_flags: [{ issue: { description: "Attribution to Guido van Rossum is correct", quote: "created by Guido van Rossum", severity: "low" }, reason: "Factually accurate" }],
+            summary: "The response contains three significant factual errors about Python's release date, execution model, and syntax philosophy."
+          },
+          critiques: [
+            { critic_type: "factual_accuracy", score: 2, self_confidence: 5, model_used: "deepseek-chat", latency_ms: 2341, tokens_used: 312, issues: [
+              { description: "Release year is wrong — 1991 not 1995", quote: "first released in 1995", severity: "high" },
+              { description: "Python is interpreted, not compiled", quote: "compiled language", severity: "high" }
+            ]},
+            { critic_type: "logical_consistency", score: 4, self_confidence: 4, model_used: "deepseek-reasoner", latency_ms: 8920, tokens_used: 445, issues: [
+              { description: "Claiming verbose syntax contradicts Python's reputation which the response implicitly builds on", quote: "verbose syntax", severity: "medium" }
+            ]},
+            { critic_type: "completeness", score: 3, self_confidence: 4, model_used: "deepseek-chat", latency_ms: 1876, tokens_used: 289, issues: [
+              { description: "Does not mention Python's primary use cases (data science, web dev, automation)", quote: "primarily used for systems programming", severity: "high" }
+            ]}
+          ],
+          total_latency_ms: 11240, total_tokens_used: 1046, total_cost_usd: 0.00271
+        }
+      },
+      {
+        label: "Logical contradiction",
+        input_text: "Git branches are extremely heavyweight operations. Creating a branch copies the entire codebase, which is why developers should use them sparingly. However, Git's main advantage over other VCS is how freely you can create branches without any performance cost.",
+        original_prompt: "Explain how Git branching works.",
+        result: {
+          input_text: "Git branches are extremely heavyweight operations. Creating a branch copies the entire codebase, which is why developers should use them sparingly. However, Git's main advantage over other VCS is how freely you can create branches without any performance cost.",
+          verdict: {
+            quality_score: 4, confidence: 5, critics_agreed: false,
+            confirmed_issues: [
+              { description: "Direct contradiction: claims branches are heavyweight then immediately says they have no performance cost", quote: "branches are extremely heavyweight operations", severity: "high" },
+              { description: "Factually wrong: Git branches are just pointers to commits (40-char SHA), not copies of the codebase", quote: "Creating a branch copies the entire codebase", severity: "high" }
+            ],
+            dismissed_flags: [{ issue: { description: "The point about Git's branching advantage over other VCS is directionally correct", quote: "Git's main advantage over other VCS", severity: "low" }, reason: "Partially valid despite surrounding errors" }],
+            summary: "Response contains a direct logical contradiction and a fundamental factual error about how Git branches work internally."
+          },
+          critiques: [
+            { critic_type: "factual_accuracy", score: 2, self_confidence: 5, model_used: "deepseek-chat", latency_ms: 2103, tokens_used: 334, issues: [
+              { description: "Git branches do not copy the codebase — they are lightweight pointers (40-byte SHA reference)", quote: "Creating a branch copies the entire codebase", severity: "high" }
+            ]},
+            { critic_type: "logical_consistency", score: 1, self_confidence: 5, model_used: "deepseek-reasoner", latency_ms: 9441, tokens_used: 521, issues: [
+              { description: "Paragraph directly contradicts itself: 'heavyweight' in sentence 1 vs 'no performance cost' in sentence 3", quote: "branches are extremely heavyweight operations", severity: "high" }
+            ]},
+            { critic_type: "completeness", score: 4, self_confidence: 3, model_used: "deepseek-chat", latency_ms: 1654, tokens_used: 267, issues: [
+              { description: "Merging and rebasing not mentioned", quote: "Git branches are extremely heavyweight", severity: "low" }
+            ]}
+          ],
+          total_latency_ms: 12890, total_tokens_used: 1122, total_cost_usd: 0.00289
+        }
+      },
+      {
+        label: "Strong output",
+        input_text: "Recursion is a programming technique where a function calls itself to solve smaller instances of the same problem. Every recursive function needs a base case — a condition that stops the recursion — and a recursive case that breaks the problem down. Without a base case, the function calls itself infinitely until a stack overflow occurs. Classic examples include factorial calculation and tree traversal.",
+        original_prompt: "Explain recursion to a beginner programmer.",
+        result: {
+          input_text: "Recursion is a programming technique where a function calls itself to solve smaller instances of the same problem. Every recursive function needs a base case — a condition that stops the recursion — and a recursive case that breaks the problem down. Without a base case, the function calls itself infinitely until a stack overflow occurs. Classic examples include factorial calculation and tree traversal.",
+          verdict: {
+            quality_score: 8, confidence: 5, critics_agreed: true,
+            confirmed_issues: [
+              { description: "Could mention that recursion has memory overhead vs iteration — relevant for beginners to know", quote: "stack overflow occurs", severity: "low" }
+            ],
+            dismissed_flags: [
+              { issue: { description: "Examples given are appropriate for the audience", quote: "factorial calculation and tree traversal", severity: "low" }, reason: "Factorial and tree traversal are standard beginner examples" },
+              { issue: { description: "Technical accuracy of base/recursive case explanation verified", quote: "base case", severity: "low" }, reason: "Correct and clearly explained" }
+            ],
+            summary: "Accurate, logically structured, and appropriately scoped for a beginner audience. Minor omission around performance tradeoffs."
+          },
+          critiques: [
+            { critic_type: "factual_accuracy", score: 5, self_confidence: 5, model_used: "deepseek-chat", latency_ms: 1893, tokens_used: 298, issues: [] },
+            { critic_type: "logical_consistency", score: 5, self_confidence: 5, model_used: "deepseek-reasoner", latency_ms: 7234, tokens_used: 412, issues: [] },
+            { critic_type: "completeness", score: 4, self_confidence: 4, model_used: "deepseek-chat", latency_ms: 1541, tokens_used: 251, issues: [
+              { description: "Stack overflow consequence mentioned but memory tradeoff vs iteration not explained", quote: "stack overflow occurs", severity: "low" }
+            ]}
+          ],
+          total_latency_ms: 9821, total_tokens_used: 961, total_cost_usd: 0.00248
+        }
+      }
+    ];
+
+    function scoreColor(score, max) {
+      const ratio = score / max;
+      if (ratio >= 0.7) return 'text-green-400';
+      if (ratio >= 0.4) return 'text-amber-400';
+      return 'text-red-400';
+    }
+    function activateNode(id) {
+      $(id).classList.remove('node-idle');
+      $(id).classList.add('node-active');
+    }
+    function showLine(id) {
+      $(id).classList.remove('opacity-0');
+      $(id).classList.add('animate-flow-down', 'opacity-100');
+    }
+    function setCriticLoading(contentId) { $(contentId).innerHTML = spinner; }
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    function setCriticResult(contentId, critique) {
+      const topIssue = critique.issues.length > 0
+        ? `<div class="text-xs text-gray-400 mt-2 truncate" title="${critique.issues[0].description}">${critique.issues[0].description}</div>`
+        : `<div class="text-xs text-green-400/70 mt-2">No issues</div>`;
+      $(contentId).innerHTML = `
+        <div class="font-mono text-2xl font-bold ${scoreColor(critique.score, 5)}">${critique.score}/5</div>
+        <div class="text-xs text-gray-500 mt-1">${critique.issues.length} issue${critique.issues.length !== 1 ? 's' : ''} · ${Math.round(critique.latency_ms)}ms</div>
+        ${topIssue}`;
+    }
+
+    // --- Results panel rendering ---
+    function renderResults(result) {
+      lastResult = result;
+      const verdict = result.verdict;
+      const critiques = result.critiques || [];
+      const criticMap = {};
+      critiques.forEach(c => { criticMap[c.critic_type] = c; });
+
+      const qs = verdict.quality_score;
+      const scoreHex = qs < 4 ? '#EF4444' : qs <= 6 ? '#F59E0B' : '#10B981';
+      const scoreTextClass = qs < 4 ? 'text-red-400' : qs <= 6 ? 'text-amber-400' : 'text-green-400';
+
+      // Panel 1: Verdict — Animated SVG ring
+      const circle = $('score-ring-circle');
+      const circumference = 326.73;
+      const offset = circumference - (qs / 10) * circumference;
+      circle.style.stroke = scoreHex;
+      circle.style.filter = `drop-shadow(0 0 6px ${scoreHex}40)`;
+      // Reset then animate
+      circle.style.transition = 'none';
+      circle.setAttribute('stroke-dashoffset', circumference);
+      void circle.offsetWidth;
+      circle.style.transition = 'stroke-dashoffset 1.2s ease-out';
+      circle.setAttribute('stroke-dashoffset', offset);
+
+      // Count-up animation for score number
+      const scoreEl = $('score-ring-value');
+      scoreEl.className = `font-mono text-3xl font-bold ${scoreTextClass}`;
+      animateCount(scoreEl, 0, qs, 1200);
+
+      // Top border color on verdict panel
+      $('panel-verdict-border').style.background = scoreHex;
+
+      // Confidence
+      $('confidence-badge').textContent = `Confidence ${verdict.confidence}/5`;
+
+      // Agreement / Disagreement banner
+      if (verdict.critics_agreed) {
+        $('agreement-indicator').innerHTML = `
+          <div class="w-full rounded-lg bg-green-500/10 border border-green-500/20 px-3 py-2 text-center">
+            <span class="text-green-400 text-xs font-medium">✓ All critics in agreement</span>
+          </div>`;
+      } else {
+        const scores = critiques.map(c => c.score);
+        const maxS = Math.max(...scores), minS = Math.min(...scores);
+        const outlier = critiques.find(c => c.score === minS);
+        const others = critiques.filter(c => c.score !== minS);
+        const othersScore = others.length > 0 ? others[0].score : maxS;
+        const criticLabels = { factual_accuracy: 'Factual', logical_consistency: 'Logic', completeness: 'Completeness' };
+        const outlierName = outlier ? criticLabels[outlier.critic_type] : '';
+        $('agreement-indicator').innerHTML = `
+          <div class="w-full rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-center">
+            <div class="text-amber-400 text-xs font-medium mb-0.5">⚠ Critics disagreed</div>
+            <div class="text-[10px] text-amber-300/70">${outlierName} scored ${minS}/5 vs ${othersScore}/5 from others</div>
+          </div>`;
+      }
+
+      // Confirmed / Dismissed counts
+      $('confirmed-count').textContent = verdict.confirmed_issues.length;
+      $('dismissed-count').textContent = verdict.dismissed_flags.length;
+
+      // Cost / Latency
+      $('metric-cost').textContent = `$${result.total_cost_usd.toFixed(5)}`;
+      $('metric-latency').textContent = `${Math.round(result.total_latency_ms)}ms`;
+
+
+      // Panel 2: Critic Breakdown — full cards with dot ratings
+      const criticOrder = ['factual_accuracy', 'logical_consistency', 'completeness'];
+      const criticLabelsMap = { factual_accuracy: 'Factual Accuracy', logical_consistency: 'Logical Consistency', completeness: 'Completeness' };
+      const criticColors = { factual_accuracy: '#F87171', logical_consistency: '#FBBF24', completeness: '#60A5FA' };
+      const criticDotsBg = { factual_accuracy: 'bg-red-400', logical_consistency: 'bg-amber-400', completeness: 'bg-blue-400' };
+
+      const allScores = critiques.map(c => c.score);
+      const avgScore = allScores.reduce((a,b) => a+b, 0) / allScores.length;
+
+      let rowsHtml = '';
+      criticOrder.forEach(ct => {
+        const c = criticMap[ct];
+        if (!c) return;
+        const isDivergent = !verdict.critics_agreed && Math.abs(c.score - avgScore) >= 1.5;
+        const borderStyle = isDivergent ? `border-left: 3px solid #F59E0B; padding-left: 12px;` : '';
+        const divergeLabel = isDivergent ? `<div class="text-[10px] text-amber-400 mt-1">↑ Flagged disagreement</div>` : '';
+        const dotColor = criticColors[ct];
+
+        // Dot rating
+        let dots = '';
+        for (let i = 1; i <= 5; i++) {
+          dots += i <= c.score
+            ? `<span class="dot" style="background:${dotColor}"></span>`
+            : `<span class="dot dot-empty"></span>`;
+        }
+
+        // Issues as chips or green pass
+        let issuesHtml = '';
+        if (c.issues.length > 0) {
+          issuesHtml = '<div class="flex flex-wrap gap-1.5 mt-2">';
+          c.issues.slice(0, 3).forEach(iss => {
+            const sevDot = iss.severity === 'high' ? 'bg-red-400' : iss.severity === 'medium' ? 'bg-amber-400' : 'bg-gray-400';
+            const truncDesc = iss.description.length > 40 ? iss.description.slice(0, 40) + '…' : iss.description;
+            issuesHtml += `<span class="issue-chip" title="${escapeHtml(iss.description)}"><span class="w-1.5 h-1.5 rounded-full ${sevDot} shrink-0"></span><span class="text-gray-400 truncate">${escapeHtml(truncDesc)}</span></span>`;
+          });
+          if (c.issues.length > 3) {
+            issuesHtml += `<span class="issue-chip"><span class="text-gray-500">+${c.issues.length - 3} more</span></span>`;
+          }
+          issuesHtml += '</div>';
+        } else {
+          issuesHtml = `<div class="flex items-center gap-1.5 mt-2"><svg class="w-3.5 h-3.5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span class="text-xs text-green-400/80">No issues found</span></div>`;
+        }
+
+        rowsHtml += `
+          <div class="rounded-lg bg-white/[0.02] border border-white/[0.04] p-3" style="${borderStyle}">
+            <div class="flex items-center justify-between mb-1.5">
+              <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full" style="background:${dotColor}"></span>
+                <span class="text-xs text-gray-200 font-medium">${criticLabelsMap[ct]}</span>
+              </div>
+              <span class="font-mono text-xs ${scoreColor(c.score, 5)}">${c.score}/5</span>
+            </div>
+            <div class="dot-rating mb-1">${dots}</div>
+            ${issuesHtml}
+            ${divergeLabel}
+          </div>`;
+      });
+      $('critic-rows').innerHTML = rowsHtml;
+
+      // Panel 3: Annotated Output — with enhanced tooltips
+      const inputText = result.input_text;
+      const allIssues = [];
+      critiques.forEach(c => {
+        c.issues.forEach(iss => {
+          allIssues.push({ ...iss, critic: c.critic_type });
+        });
+      });
+      (verdict.confirmed_issues || []).forEach(iss => {
+        if (!allIssues.find(a => a.quote === iss.quote)) {
+          allIssues.push({ ...iss, critic: 'adjudicator' });
+        }
+      });
+
+      const issueSpans = [];
+      allIssues.forEach(iss => {
+        const idx = inputText.toLowerCase().indexOf(iss.quote.toLowerCase());
+        if (idx !== -1) {
+          issueSpans.push({ start: idx, end: idx + iss.quote.length, issue: iss });
+        }
+      });
+      issueSpans.sort((a, b) => a.start - b.start || b.end - a.end);
+
+      const cleaned = [];
+      let lastEnd = -1;
+      issueSpans.forEach(span => {
+        if (span.start >= lastEnd) {
+          cleaned.push(span);
+          lastEnd = span.end;
+        }
+      });
+
+      const criticLabelShort = { factual_accuracy: 'Factual', logical_consistency: 'Logic', completeness: 'Completeness', adjudicator: 'Adjudicator' };
+      const sevBadgeClass = { high: 'bg-red-500/20 text-red-300 border-red-500/30', medium: 'bg-amber-500/20 text-amber-300 border-amber-500/30', low: 'bg-gray-500/20 text-gray-300 border-gray-500/30' };
+
+      if (cleaned.length === 0) {
+        $('annotated-text').innerHTML = `
+          <div class="rounded-lg bg-green-500/10 border border-green-500/20 px-4 py-3 mb-3 flex items-center gap-2">
+            <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+            <span class="text-xs text-green-400 font-medium">All clear — no issues confirmed</span>
+          </div>
+          <div class="text-[13px] text-gray-400 leading-relaxed">${escapeHtml(inputText)}</div>`;
+        $('annotation-legend').classList.add('hidden');
+      } else {
+        $('annotation-legend').classList.remove('hidden');
+        let annotated = '';
+        let cursor = 0;
+        cleaned.forEach(span => {
+          if (span.start > cursor) annotated += escapeHtml(inputText.slice(cursor, span.start));
+          const hlClass = span.issue.severity === 'high' ? 'hl-high' : span.issue.severity === 'medium' ? 'hl-medium' : 'hl-low';
+          const criticName = criticLabelShort[span.issue.critic] || span.issue.critic;
+          annotated += `<span class="${hlClass}" data-tt-critic="${escapeHtml(criticName)}" data-tt-severity="${span.issue.severity}" data-tt-desc="${escapeHtml(span.issue.description)}">${escapeHtml(inputText.slice(span.start, span.end))}</span>`;
+          cursor = span.end;
+        });
+        if (cursor < inputText.length) annotated += escapeHtml(inputText.slice(cursor));
+        $('annotated-text').innerHTML = annotated;
+      }
+
+      // Show results section with animation
+      const resultsEl = $('results-section');
+      resultsEl.classList.remove('hidden');
+      void resultsEl.offsetWidth;
+      resultsEl.classList.add('animate-results-enter');
+      resultsEl.style.opacity = '1';
+    }
+
+    function animateCount(el, from, to, duration) {
+      const start = performance.now();
+      function tick(now) {
+        const progress = Math.min((now - start) / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
+        el.textContent = Math.round(from + (to - from) * eased);
+        if (progress < 1) requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function resetToInput() {
+      $('pipeline').classList.add('hidden');
+      const resultsEl = $('results-section');
+      resultsEl.classList.add('hidden');
+      resultsEl.classList.remove('animate-results-enter');
+      resultsEl.style.opacity = '0';
+      $('text-input').value = '';
+      $('prompt-input').value = '';
+      $('text-input').focus();
+      window.scrollTo({ top: $('try-it').offsetTop - 80, behavior: 'smooth' });
+    }
+
+    function copyResults() {
+      if (!lastResult) return;
+      navigator.clipboard.writeText(JSON.stringify(lastResult, null, 2)).then(() => {
+        $('copy-btn').textContent = '✓ Copied';
+        setTimeout(() => { $('copy-btn').textContent = 'Copy results as JSON'; }, 2000);
+      });
+    }
+
+    // --- Main arbitration flow (DEMO MODE) ---
+    async function runArbitration() {
+      if (selectedCaseIndex < 0 || selectedCaseIndex >= DEMO_CASES.length) {
+        $('text-input').classList.add('border-red-500/50');
+        setTimeout(() => $('text-input').classList.remove('border-red-500/50'), 2000);
+        return;
+      }
+
+      const text = DEMO_CASES[selectedCaseIndex].input_text;
+
+      // Hide previous results
+      $('results-section').classList.add('hidden');
+      $('results-section').classList.remove('animate-results-enter');
+      $('results-section').style.opacity = '0';
+
+      // Reset and show pipeline
+      $('run-btn').disabled = true;
+      $('run-btn').textContent = 'Running...';
+      $('pipeline').classList.remove('hidden');
+      $('node-verdict').classList.add('hidden');
+
+      ['node-input','node-fa','node-lc','node-comp','node-disagree','node-adj'].forEach(id => {
+        $(id).classList.add('node-idle');
+        $(id).classList.remove('node-active','animate-pulse-glow','animate-fade-in-up');
+      });
+      ['line-input-critics','line-to-fa','line-to-lc','line-to-comp','line-critics-disagree','line-disagree-adj','line-adj-verdict'].forEach(id => {
+        $(id).classList.add('opacity-0');
+        $(id).classList.remove('animate-flow-down','opacity-100');
+      });
+      $('fa-content').innerHTML = '<div class="text-gray-600 text-xs">waiting</div>';
+      $('lc-content').innerHTML = '<div class="text-gray-600 text-xs">waiting</div>';
+      $('comp-content').innerHTML = '<div class="text-gray-600 text-xs">waiting</div>';
+      $('disagree-content').textContent = '—';
+      $('adj-content').textContent = '—';
+
+      // Step 1: Input node
+      await sleep(200);
+      $('node-input-text').textContent = text.substring(0, 50) + (text.length > 50 ? '…' : '');
+      activateNode('node-input');
+      $('node-input').classList.add('animate-pulse-glow');
+      $('input-card').classList.add('animate-pulse-glow');
+      await sleep(600);
+      $('node-input').classList.remove('animate-pulse-glow');
+      $('input-card').classList.remove('animate-pulse-glow');
+
+      // Step 2: Flow to critics
+      showLine('line-input-critics');
+      await sleep(400);
+      showLine('line-to-fa'); showLine('line-to-lc'); showLine('line-to-comp');
+      await sleep(300);
+      activateNode('node-fa'); activateNode('node-lc'); activateNode('node-comp');
+      setCriticLoading('fa-content'); setCriticLoading('lc-content'); setCriticLoading('comp-content');
+
+      // Simulate API delay (demo mode)
+      await sleep(3200);
+      const result = DEMO_CASES[selectedCaseIndex].result;
+
+      // Step 3: Critic results
+      const critiques = result.critiques || [];
+      const criticMap = {};
+      critiques.forEach(c => { criticMap[c.critic_type] = c; });
+
+      if (criticMap['factual_accuracy']) { setCriticResult('fa-content', criticMap['factual_accuracy']); $('node-fa').classList.add('animate-fade-in-up'); }
+      await sleep(300);
+      if (criticMap['logical_consistency']) { setCriticResult('lc-content', criticMap['logical_consistency']); $('node-lc').classList.add('animate-fade-in-up'); }
+      await sleep(300);
+      if (criticMap['completeness']) { setCriticResult('comp-content', criticMap['completeness']); $('node-comp').classList.add('animate-fade-in-up'); }
+
+      // Step 4: Disagreement
+      await sleep(500);
+      showLine('line-critics-disagree');
+      await sleep(400);
+      activateNode('node-disagree');
+      const verdict = result.verdict;
+      if (verdict.critics_agreed) {
+        $('disagree-content').innerHTML = '<span class="text-green-400">✓ Agreement</span>';
+      } else {
+        const scores = critiques.map(c => c.score);
+        const spread = Math.max(...scores) - Math.min(...scores);
+        $('disagree-content').innerHTML = `<span class="text-amber-400">⚠ ${spread}-point spread</span>`;
+      }
+
+      // Step 5: Adjudicator
+      await sleep(600);
+      showLine('line-disagree-adj');
+      await sleep(400);
+      activateNode('node-adj');
+      $('node-adj').classList.add('glow-indigo');
+      $('adj-content').innerHTML = spinner;
+      await sleep(800);
+      $('adj-content').innerHTML = `
+        <div class="text-xs text-gray-400 italic">"${verdict.summary.substring(0, 80)}…"</div>
+        <div class="text-xs text-gray-500 mt-1">Confirmed ${verdict.confirmed_issues.length} · Dismissed ${verdict.dismissed_flags.length}</div>`;
+
+      // Step 6: Mini verdict in pipeline
+      await sleep(600);
+      showLine('line-adj-verdict');
+      await sleep(400);
+      const vColor = scoreColor(verdict.quality_score, 10);
+      $('node-verdict').classList.remove('hidden');
+      $('node-verdict').classList.add('animate-slide-in-bottom');
+      $('verdict-mini').className = `font-mono text-lg font-bold ${vColor}`;
+      $('verdict-mini').textContent = `${verdict.quality_score}/10`;
+
+      // Step 7: Show full results section
+      await sleep(800);
+      renderResults(result);
+
+      $('run-btn').disabled = false;
+      $('run-btn').textContent = 'Arbitrate';
+    }
+
+    // --- Demo case selection ---
+    function selectDemoCase(index) {
+      selectedCaseIndex = index;
+      const c = DEMO_CASES[index];
+      $('text-input').value = c.input_text;
+      $('prompt-input').value = c.original_prompt;
+      document.querySelectorAll('.demo-pill').forEach((pill, i) => {
+        if (i === index) {
+          pill.classList.add('bg-critic/20', 'border-critic/50', 'text-white');
+          pill.classList.remove('border-subtle', 'text-gray-400');
+        } else {
+          pill.classList.remove('bg-critic/20', 'border-critic/50', 'text-white');
+          pill.classList.add('border-subtle', 'text-gray-400');
+        }
+      });
+    }
+
+    // Event listeners
+    $('run-btn').addEventListener('click', runArbitration);
+    $('reset-btn').addEventListener('click', resetToInput);
+    $('copy-btn').addEventListener('click', copyResults);
+    document.querySelectorAll('.demo-pill').forEach(pill => {
+      pill.addEventListener('click', () => selectDemoCase(parseInt(pill.dataset.case)));
+    });
+    selectDemoCase(0);
+
+    // --- How-it-works diagram: scroll-trigger animation ---
+    (function() {
+      const diagram = $('pipeline-diagram');
+      if (!diagram) return;
+
+      let animated = false;
+
+      function animateDiagram() {
+        if (animated) return;
+        animated = true;
+        diagram.classList.add('diagram-visible');
+
+        // Animate nodes left to right
+        const nodes = [
+          { el: $('diag-input'), delay: 0 },
+          { el: $('diag-fa'), delay: 400 },
+          { el: $('diag-lc'), delay: 600 },
+          { el: $('diag-comp'), delay: 800 },
+          { el: $('diag-disagree'), delay: 1200 },
+          { el: $('diag-adj'), delay: 1600 },
+          { el: $('diag-verdict'), delay: 2000 },
+        ];
+        nodes.forEach(({ el, delay }) => {
+          if (!el) return;
+          setTimeout(() => {
+            el.style.opacity = '1';
+            el.style.transform = 'translateX(0) scale(1)';
+          }, delay);
+        });
+
+        // Animate connection lines
+        document.querySelectorAll('.line-draw').forEach(line => {
+          const delay = parseInt(line.dataset.delay) || 0;
+          setTimeout(() => line.classList.add('visible'), delay);
+        });
+      }
+
+      // IntersectionObserver for scroll trigger
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) animateDiagram();
+        });
+      }, { threshold: 0.2 });
+      observer.observe(diagram);
+
+      // Disagreement detector toggle
+      const toggle = $('disagree-toggle');
+      if (toggle) {
+        let state = true;
+        setInterval(() => {
+          state = !state;
+          toggle.innerHTML = state
+            ? '<span class="text-amber-400">⚠ 2-pt spread</span>'
+            : '<span class="text-green-400">✓ All agree</span>';
+          const diamond = toggle.closest('#diag-disagree').querySelector('.rotate-45');
+          if (diamond) {
+            diamond.style.borderColor = state ? 'rgba(245,158,11,0.3)' : 'rgba(34,197,94,0.3)';
+          }
+        }, 3000);
+      }
+    })();
+
+    // --- Global tooltip for annotated output ---
+    (function() {
+      // Create tooltip element
+      const tt = document.createElement('div');
+      tt.id = 'global-tooltip';
+      tt.innerHTML = '<div class="tt-content"></div><div class="tt-arrow"></div>';
+      document.body.appendChild(tt);
+
+      const ttContent = tt.querySelector('.tt-content');
+      const ttArrow = tt.querySelector('.tt-arrow');
+
+      const sevColors = { high: '#EF4444', medium: '#F59E0B', low: '#9CA3AF' };
+      const sevBg = { high: 'rgba(239,68,68,0.15)', medium: 'rgba(245,158,11,0.15)', low: 'rgba(156,163,175,0.15)' };
+      const criticDotColors = { Factual: '#F87171', Logic: '#FBBF24', Completeness: '#60A5FA', Adjudicator: '#818CF8' };
+
+      function showTooltip(span) {
+        const critic = span.dataset.ttCritic;
+        const severity = span.dataset.ttSeverity;
+        const desc = span.dataset.ttDesc;
+        if (!desc) return;
+
+        const dotColor = criticDotColors[critic] || '#A78BFA';
+        const sevColor = sevColors[severity] || sevColors.low;
+        const sevBgColor = sevBg[severity] || sevBg.low;
+
+        ttContent.innerHTML = `
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+            <span style="width:6px;height:6px;border-radius:50%;background:${dotColor};flex-shrink:0;"></span>
+            <span style="font-size:10px;font-weight:500;color:#e5e7eb;">${critic}</span>
+            <span style="font-size:9px;padding:1px 6px;border-radius:4px;background:${sevBgColor};color:${sevColor};border:1px solid ${sevColor}30;">${severity}</span>
+          </div>
+          <div style="font-size:11px;color:#d1d5db;line-height:1.5;">${desc}</div>
+        `;
+
+        // Position calculation
+        const rect = span.getBoundingClientRect();
+        tt.style.display = 'block';
+        tt.classList.remove('visible', 'arrow-down', 'arrow-up');
+
+        // Measure tooltip
+        const ttRect = tt.getBoundingClientRect();
+        const ttHeight = ttRect.height;
+        const ttWidth = ttRect.width;
+
+        let top, arrowClass;
+        // Try above
+        if (rect.top - ttHeight - 8 > 0) {
+          top = rect.top - ttHeight - 8;
+          arrowClass = 'arrow-down';
+        } else {
+          // Show below
+          top = rect.bottom + 8;
+          arrowClass = 'arrow-up';
+        }
+
+        let left = rect.left + rect.width / 2 - ttWidth / 2;
+        // Clamp to viewport
+        if (left + ttWidth > window.innerWidth - 8) left = window.innerWidth - ttWidth - 8;
+        if (left < 8) left = 8;
+
+        tt.style.top = top + 'px';
+        tt.style.left = left + 'px';
+        tt.classList.add('visible', arrowClass);
+
+        // Adjust arrow position to point at span center
+        const arrowLeft = rect.left + rect.width / 2 - left;
+        ttArrow.style.left = Math.max(12, Math.min(arrowLeft, ttWidth - 12)) + 'px';
+      }
+
+      function hideTooltip() {
+        tt.classList.remove('visible');
+      }
+
+      // Event delegation on annotated-text container
+      document.addEventListener('mouseover', (e) => {
+        const span = e.target.closest('[data-tt-desc]');
+        if (span) showTooltip(span);
+      });
+      document.addEventListener('mouseout', (e) => {
+        const span = e.target.closest('[data-tt-desc]');
+        if (span) hideTooltip();
+      });
+      window.addEventListener('scroll', hideTooltip, { passive: true });
+    })();
+  </script>
+</body>
+</html>

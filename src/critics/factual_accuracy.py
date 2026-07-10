@@ -7,9 +7,10 @@ from schemas import Critique
 
 
 SYSTEM_PROMPT = (
-    "You are a factual accuracy auditor. Your job is to identify claims in the "
-    "given text that are incorrect, unsupported, or hallucinated. You are "
-    "thorough and skeptical. You only flag issues you are confident about."
+    "You are a factual accuracy auditor. You evaluate whether an LLM-generated "
+    "response is factually correct AND relevant to what was actually asked. If "
+    "the response completely ignores the question and answers something else "
+    "entirely, that is a factual/relevance failure — flag it as high severity."
 )
 
 
@@ -22,9 +23,18 @@ class FactualAccuracyCritic(BaseCritic):
             model_name="deepseek-chat",
         )
 
-    def critique(self, text: str) -> Critique:
+    def critique(self, text: str, original_prompt: str = "") -> Critique:
+        if original_prompt:
+            context_block = (
+                f"Original question:\n{original_prompt}\n\n"
+                f"LLM response:\n{text}"
+            )
+        else:
+            context_block = f"Text to audit:\n{text}"
+
         user_prompt = (
-            "Audit the following LLM-generated text for factual accuracy.\n\n"
+            "Audit the following LLM-generated text for factual accuracy and "
+            "relevance to the original question.\n\n"
             "Respond ONLY in valid JSON matching this exact structure:\n"
             '{'
             '"score": int, '
@@ -37,8 +47,10 @@ class FactualAccuracyCritic(BaseCritic):
             "- score must be an integer from 1 to 5, where 5 is best.\n"
             "- self_confidence must be an integer from 1 to 5.\n"
             '- severity must be one of "low", "medium", or "high".\n'
+            "- If the response does not address the question at all, flag it "
+            "as a high-severity relevance failure.\n"
             "- Do not include markdown fences, comments, or explanatory text.\n\n"
-            f"Text to audit:\n{text}"
+            f"{context_block}"
         )
 
         response_text, tokens_used, latency_ms = self._call_llm(

@@ -79,7 +79,12 @@ ADJUDICATOR_SYSTEM_PROMPT = (
     '"dismissed_flags": [{"issue": {"description": str, "quote": str, "severity": str}, "reason": str}], '
     '"critics_agreed": bool, "summary": str}\n\n'
     "Rules:\n"
-    "- quality_score: 1-10 (10 is perfect).\n"
+    "- quality_score: 1-10 (10 is perfect). You MUST derive this score "
+    "EXCLUSIVELY from the critic scores and issues below. Use this formula as "
+    "a baseline: quality_score = round(average_critic_score * 2). Then subtract "
+    "1 point for each confirmed high-severity issue, 0.5 for each medium. "
+    "Do NOT penalize text for being short, informal, or lacking depth unless "
+    "a critic explicitly flagged it as an issue.\n"
     "- confidence: 1-5.\n"
     "- severity: low/medium/high.\n"
     "- No markdown fences or commentary outside JSON."
@@ -160,8 +165,8 @@ def run_arbitration(text: str, original_prompt: str = "") -> ArbitrationResult:
 
     with ThreadPoolExecutor(max_workers=3) as pool:
         futures = {
-            pool.submit(fa.critique, text): "factual_accuracy",
-            pool.submit(lc.critique, text): "logical_consistency",
+            pool.submit(fa.critique, text, original_prompt): "factual_accuracy",
+            pool.submit(lc.critique, text, original_prompt): "logical_consistency",
             pool.submit(comp.critique, text, original_prompt): "completeness",
         }
         for fut in as_completed(futures):
