@@ -1,0 +1,52 @@
+[
+  {
+    "name": "Terrible — Python basics all wrong",
+    "prompt": "Explain what Python is, how it executes code, and its concurrency model.",
+    "text": "Python was created by Guido van Rossum in 1995. It is a compiled language that runs directly on bare metal without any interpreter. Python is slower than C because it is compiled, but faster than C because it is interpreted. The GIL allows true multi-threading parallelism, which is why Python dominates high-frequency trading systems."
+  },
+  {
+    "name": "Bad — TCP/IP misconceptions",
+    "prompt": "Explain how TCP ensures reliable data delivery.",
+    "text": "TCP is a connectionless protocol that sends packets without acknowledgment. It uses UDP under the hood for speed. Packets are never retransmitted because the network guarantees delivery. TCP's three-way handshake consists of four steps: SYN, ACK, FIN, RST. Flow control is unnecessary since modern networks never congest."
+  },
+  {
+    "name": "Bad — contradictory ML claims",
+    "prompt": "What is overfitting in machine learning and how do you prevent it?",
+    "text": "Overfitting occurs when a model performs well on training data but poorly on test data. To prevent it, you should always use the largest possible model with the most parameters. More parameters always reduce overfitting. Regularization makes overfitting worse by constraining the model. Dropout should never be used because it randomly destroys learned features."
+  },
+  {
+    "name": "Mixed — HTTP/2 partially correct",
+    "prompt": "How does HTTP/2 improve on HTTP/1.1?",
+    "text": "HTTP/2 introduces multiplexing, allowing multiple requests over a single TCP connection. It uses header compression via HPACK to reduce overhead. However, HTTP/2 requires encryption (TLS) by specification, making unencrypted HTTP/2 impossible. Server push allows the server to send resources before the client asks. HTTP/2 was released in 2020 as RFC 9113."
+  },
+  {
+    "name": "Mixed — Docker half-right",
+    "prompt": "Explain how Docker containers differ from virtual machines.",
+    "text": "Docker containers are lightweight because they share the host OS kernel instead of running a full guest OS. Each container has its own isolated filesystem and network namespace. However, containers provide the same level of security isolation as VMs because they use hardware-level hypervisors. Docker images are built from Dockerfiles using a layered filesystem. Containers are stateful by default and persist all data between restarts."
+  },
+  {
+    "name": "Mixed — Git workflow mostly right",
+    "prompt": "Explain the Git branching model and how merging works.",
+    "text": "Git branches are lightweight pointers to commits. Creating a branch is O(1) since it just writes a 40-character SHA to a file. Merging combines two branch histories: fast-forward merges move the pointer, while three-way merges create a merge commit. Rebasing replays commits onto a new base, producing a linear history. However, rebasing is always safer than merging because it never causes conflicts."
+  },
+  {
+    "name": "Good — Java GC accurate",
+    "prompt": "Explain how garbage collection works in Java.",
+    "text": "Java uses automatic garbage collection to manage memory. The JVM tracks object references and reclaims memory when objects are no longer reachable from GC roots. Modern JVMs use generational collection: young generation for short-lived objects (collected via minor GC) and old generation for long-lived objects (collected via major GC). The G1 collector divides the heap into regions and prioritizes collecting regions with the most garbage. GC pauses can be tuned with flags like -XX:MaxGCPauseMillis."
+  },
+  {
+    "name": "Good — REST API design solid",
+    "prompt": "What are best practices for designing a REST API?",
+    "text": "REST APIs should use nouns for resource URLs (e.g., /users, /orders) and HTTP verbs for actions (GET to read, POST to create, PUT to replace, PATCH to update, DELETE to remove). Use proper status codes: 200 for success, 201 for creation, 400 for bad requests, 404 for not found, 500 for server errors. Support pagination for collections via limit/offset or cursor-based params. Version your API in the URL or headers. Use JSON as the default format and include HATEOAS links where practical."
+  },
+  {
+    "name": "Good — SQL indexing accurate",
+    "prompt": "How do database indexes work and when should you use them?",
+    "text": "Database indexes are data structures (typically B-trees) that speed up row lookups by maintaining sorted references to table data. A query on an indexed column can binary-search the tree in O(log n) instead of scanning the full table in O(n). Indexes add write overhead because every INSERT, UPDATE, or DELETE must also update the index. Use indexes on columns that appear in WHERE clauses, JOIN conditions, and ORDER BY. Composite indexes work left-to-right: an index on (a, b, c) helps queries filtering on a, or a+b, or a+b+c, but not b alone."
+  },
+  {
+    "name": "Good — DNS explanation clear",
+    "prompt": "Explain how DNS resolution works step by step.",
+    "text": "When you type a URL, your browser first checks its local DNS cache. If no cached record exists, it queries the OS resolver, which contacts a recursive DNS resolver (often your ISP's). The recursive resolver queries root nameservers to find the TLD nameserver (.com, .org), then queries the TLD server to find the authoritative nameserver for the domain. The authoritative server returns the IP address, which propagates back through the chain. Results are cached at each level according to the TTL value. DNSSEC adds cryptographic signatures to prevent spoofing."
+  }
+]

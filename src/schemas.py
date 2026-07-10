@@ -73,13 +73,13 @@ class DismissedFlag(BaseModel):
 class Verdict(BaseModel):
     quality_score: int = Field(
         ...,
-        description="Adjudicator's final quality score for the output, from 1 to 10.",
+        description="Adjudicator's final quality score, or 0 if arbitration failed.",
     )
     confidence: int = Field(
         ...,
-        ge=1,
+        ge=0,
         le=5,
-        description="Adjudicator confidence in the final verdict.",
+        description="Adjudicator confidence, or 0 if arbitration failed.",
     )
     confirmed_issues: list[CritiqueIssue] = Field(
         default_factory=list,
@@ -101,8 +101,8 @@ class Verdict(BaseModel):
     @field_validator("quality_score")
     @classmethod
     def validate_quality_score(cls, value: int) -> int:
-        if not 1 <= value <= 10:
-            raise ValueError("quality_score must be between 1 and 10")
+        if value != 0 and not 1 <= value <= 10:
+            raise ValueError("quality_score must be 0 or between 1 and 10")
         return value
 
 
