@@ -3,6 +3,3 @@ name = "llm-output-arbitration"
 version = "1.0.0"
 description = "Multi-agent LLM output arbitration system"
 requires-python = ">=3.11"
-
-[tool.vercel]
-entrypoint = "src.api:app"
